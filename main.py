@@ -1,64 +1,63 @@
 from dotenv import load_dotenv
-load_dotenv()
-
-from typing import Annotated
-from typing_extensions import TypedDict
-from langgraph.graph import StateGraph
-from langgraph.graph.message import add_messages
-from langchain_openai import AzureChatOpenAI
 import getpass
 import os
-from IPython.display import Image, display
+import uuid
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from agent import get_agent_response
+from main_functions import ChatRequest
+from fastapi.middleware.cors import CORSMiddleware  # Add this import
+from session_redis import SessionManager  # Make sure this import matches your file/module name
 
+load_dotenv()
+# if not os.getenv("HUGGINGFACEHUB_API_TOKEN"):
+#     os.environ["HUGGINGFACEHUB_API_TOKEN"] = getpass.getpass("Enter your token: ")
+app = FastAPI()
 
-
-if "AZURE_OPENAI_API_KEY" not in os.environ:
-    print('inside if')
-    os.environ["AZURE_OPENAI_API_KEY"] = getpass.getpass(
-        os.environ["AZURE_OPENAI_API_KEY"]
-    )
-os.environ["AZURE_OPENAI_ENDPOINT"] = "https://ragha-meisspfj-eastus2.cognitiveservices.azure.com/"
-
-class State(TypedDict):
-    # messages have the type "list".
-    # The add_messages function appends messages to the list, rather than overwriting them
-    messages: Annotated[list, add_messages]
-graph_builder = StateGraph(State)
-
-
-llm = AzureChatOpenAI(
-    azure_deployment="gpt-4o-mini",  # or your deployment
-    api_version="2024-12-01-preview",  # or your api version
-    temperature=0,
-    max_tokens=None,
-    timeout=None,
-    max_retries=2,
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-def chatbot(state: State):
-    return {"messages": [llm.invoke(state["messages"])]}
-# ‘’’The first argument is the unique node name
-# The second argument is the function or object that will be called whenever the node is used.’’’
-graph_builder.add_node("chatbot", chatbot)
+session_mgr = SessionManager()
 
-# Set entry and finish points
-graph_builder.set_entry_point("chatbot")
-graph_builder.set_finish_point("chatbot")
+@app.get("/favicon.ico")
+def favicon():
+    return FileResponse("favicon.ico")
 
+@app.get("/")
+def server_root():
+    return {"message": "Hello, FastAPI is running!"}
 
+@app.get("/redis-health")
+def redis_health():
+    try:
+        # PING returns True if Redis is connected
+        if session_mgr.client.ping():
+            return {"redis": "connected"}
+        else:
+            return {"redis": "not connected"}
+    except Exception as e:
+        return {"redis": "not connected", "error": str(e)}
 
-graph = graph_builder.compile()
-try:
-    display(Image(graph.get_graph().draw_mermaid_png()))
-except Exception:
-    pass
+@app.post("/chatagent")
+def chat_agent(request: ChatRequest):
+    print("inside chat agent")
+    session_id = request.session_id or str(uuid.uuid4())
 
-# Run the chatbot
-while True:
-    user_input = input("User: ")
-    if user_input.lower() in ["quit", "exit", "q"]:
-        print("Goodbye!")
-        break
-    for event in graph.stream({"messages": [("user", user_input)]}):
-        for value in event.values():
-            print("Assistant:", value["messages"][-1].content)
+    # Check if session exists in Redis
+    if session_mgr.session_exists(session_id):
+        # Append user message to existing session
+        session_mgr.add_message(session_id, "user", request.userchat)
+    else:
+        # Create new session and add user message
+        session_mgr.create_session(session_id)
+        session_mgr.add_message(session_id, "user", request.userchat)
+
+    response = get_agent_response(user_input=request.userchat)
+    session_mgr.add_message(session_id, "agent", response)
+
+    return {"response": response, "session_id": session_id}
