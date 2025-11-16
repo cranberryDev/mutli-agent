@@ -38,14 +38,10 @@ def get_agent_response(user_input: str) -> str:
     chat_model = ChatHuggingFace(llm=llm)
 
     messages = [
-        SystemMessage(content= "You are an expert assistant specializing in resume analysis and job matching. "
-                                "You will receive a job description and a candidate's resume. "
-                                "Your tasks are:\n"
-                                "1. Analyze the resume to identify relevant skills, experience, and qualifications that match the job description.\n"
-                                "2. Highlight specific examples from the resume that demonstrate suitability for the role.\n"
-                                "3. Point out any gaps or missing requirements compared to the job description.\n"
-                                "4. Provide a clear, concise, and informative summary explaining the candidate's fit for the job.\n"
-                                "Your response should help the user understand the strengths and weaknesses of the candidate in relation to the job requirements."),
+        SystemMessage(content= ("You are an expert assistant for resume and job description matching. "
+            "Given a job description and a candidate's resume, reply with a brief summary (2-3 sentences) "
+            "explaining the candidate's fit for the job. "
+            "Be concise and direct. Do not include extra analysis or steps.")),
         HumanMessage(
             content=user_input
         ),
